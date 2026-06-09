@@ -9,12 +9,12 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useGameStore } from '../store/gameStore';
 import { cn, formatTime } from '../lib/utils';
 import { getSampleChart } from '../data/sampleSongs';
-import type { Difficulty } from '../types/song';
+import type { Difficulty, Chart } from '../types/song';
 
 const DifficultySelect = () => {
   const navigate = useNavigate();
   const { songId } = useParams();
-  const { songs, selectDifficulty, getBestScore } = useSongStore();
+  const { songs, selectDifficulty, getBestScore, getChart } = useSongStore();
   const { settings } = useSettingsStore();
   const { resetGame } = useGameStore();
 
@@ -37,7 +37,7 @@ const DifficultySelect = () => {
   const handleDifficultySelect = (diff: Difficulty) => {
     selectDifficulty(diff);
     resetGame();
-    const chart = getSampleChart(diff.id);
+    const chart = getChart(diff.id) || getSampleChart(diff.id);
     if (chart) {
       navigate(`/play/${song.id}/${diff.id}`);
     }
@@ -143,7 +143,7 @@ const DifficultySelect = () => {
             {filteredDifficulties.map((diff) => {
               const best = getBestScore(diff.id);
               const density = getDensityStars(diff.noteCount, song.duration);
-              const chart = getSampleChart(diff.id);
+              const chart = getChart(diff.id) || getSampleChart(diff.id);
 
               return (
                 <NeonCard

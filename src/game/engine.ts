@@ -26,6 +26,7 @@ export class GameEngine {
   private mode: GameMode = 'normal';
   private practiceSettings: PracticeSettings | null = null;
   private engineStartTime: number = 0;
+  private inputOffset: number = 0;
 
   private judgeSystem: JudgeSystem;
   private renderer: GameRenderer;
@@ -49,6 +50,7 @@ export class GameEngine {
     this.renderer = new GameRenderer(canvas, config.renderConfig);
     this.inputSystem = new InputSystem();
     this.audioSystem = audioSystem;
+    this.inputOffset = config.inputOffset || 0;
 
     this.stats = this.createInitialStats();
     this.initLaneStates(config.renderConfig.keys);
@@ -99,6 +101,7 @@ export class GameEngine {
   }
 
   setInputOffset(offset: number): void {
+    this.inputOffset = offset;
     this.inputSystem.setInputOffset(offset);
   }
 
@@ -306,12 +309,13 @@ export class GameEngine {
   }
 
   private handleNoteHit(lane: number, hitTime: number): void {
+    const adjustedTime = this.currentTime + this.inputOffset;
     const notesInLane = this.notes.filter(
       (n) => n.lane === lane && !n.judged && !n.hit
     );
 
     for (const note of notesInLane) {
-      const result = this.judgeSystem.checkNoteHit(note, this.currentTime, this.currentTime);
+      const result = this.judgeSystem.checkNoteHit(note, adjustedTime, this.currentTime);
       if (result) {
         this.processHit(note, result, lane);
         break;

@@ -33,7 +33,7 @@ const SongSelect = () => {
         song.artist.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesBpm = song.bpm >= filterBpm[0] && song.bpm <= filterBpm[1];
       const matchesKeys =
-        filterKeys === 'all' || song.difficulties.some((d) => d.keys === filterKeys);
+        filterKeys === 'all' || song.difficulties.some((d) => d.keys === Number(filterKeys));
       const maxLevel = Math.max(...song.difficulties.map((d) => d.level));
       const matchesLevel = maxLevel >= filterLevel[0] && maxLevel <= filterLevel[1];
 
