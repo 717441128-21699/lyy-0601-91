@@ -9,6 +9,10 @@ export class AudioSystem {
   private pausedAt: number = 0;
   private isPlaying: boolean = false;
   private hitSoundBuffer: AudioBuffer | null = null;
+  private mockStartTime: number = 0;
+  private mockPausedAt: number = 0;
+  private isMockPlaying: boolean = false;
+  private playbackSpeed: number = 1.0;
 
   constructor() {
     this.initAudioContext();
@@ -71,41 +75,65 @@ export class AudioSystem {
     });
   }
 
-  play(offset: number = 0): void {
-    if (!this.audioContext || !this.audioBuffer || !this.musicGain) return;
+  setPlaybackSpeed(speed: number): void {
+    this.playbackSpeed = speed;
+  }
 
-    if (this.isPlaying) {
+  play(offset: number = 0): void {
+    if (!this.audioContext) {
+      this.initAudioContext();
+    }
+
+    if (!this.audioContext || !this.musicGain) return;
+
+    if (this.isPlaying || this.isMockPlaying) {
       this.stop();
     }
 
-    this.source = this.audioContext.createBufferSource();
-    this.source.buffer = this.audioBuffer;
-    this.source.connect(this.musicGain);
+    if (this.audioBuffer) {
+      this.source = this.audioContext.createBufferSource();
+      this.source.buffer = this.audioBuffer;
+      this.source.playbackRate.value = this.playbackSpeed;
+      this.source.connect(this.musicGain);
 
-    const startOffset = offset / 1000;
-    this.source.start(0, startOffset);
-    this.startTime = this.audioContext.currentTime - startOffset;
-    this.isPlaying = true;
+      const startOffset = offset / 1000;
+      this.source.start(0, startOffset);
+      this.startTime = this.audioContext.currentTime - startOffset * this.playbackSpeed;
+      this.isPlaying = true;
 
-    this.source.onended = () => {
-      this.isPlaying = false;
-    };
+      this.source.onended = () => {
+        this.isPlaying = false;
+      };
+    } else {
+      this.mockStartTime = performance.now() - offset / this.playbackSpeed;
+      this.mockPausedAt = offset;
+      this.isMockPlaying = true;
+    }
   }
 
   pause(): void {
-    if (!this.isPlaying || !this.source || !this.audioContext) return;
+    if (this.isPlaying && this.source && this.audioContext) {
+      this.pausedAt = this.getCurrentTime();
+      this.source.stop();
+      this.source.disconnect();
+      this.source = null;
+      this.isPlaying = false;
+    }
 
-    this.pausedAt = this.getCurrentTime();
-    this.source.stop();
-    this.source.disconnect();
-    this.source = null;
-    this.isPlaying = false;
+    if (this.isMockPlaying) {
+      this.mockPausedAt = this.getCurrentTime();
+      this.isMockPlaying = false;
+    }
   }
 
   resume(): void {
-    if (this.isPlaying || !this.audioBuffer) return;
+    if (this.isPlaying || this.isMockPlaying) return;
 
-    this.play(this.pausedAt);
+    if (this.audioBuffer) {
+      this.play(this.pausedAt);
+    } else {
+      this.play(this.mockPausedAt);
+    }
   }
 
   stop(): void {
@@ -119,14 +147,25 @@ export class AudioSystem {
       this.source = null;
     }
     this.isPlaying = false;
+    this.isMockPlaying = false;
     this.pausedAt = 0;
+    this.mockPausedAt = 0;
   }
 
   getCurrentTime(): number {
-    if (!this.audioContext || !this.isPlaying) {
-      return this.pausedAt;
+    if (this.isPlaying && this.audioContext) {
+      return (this.audioContext.currentTime - this.startTime) * 1000 * this.playbackSpeed;
     }
-    return (this.audioContext.currentTime - this.startTime) * 1000;
+
+    if (this.isMockPlaying) {
+      return (performance.now() - this.mockStartTime) * this.playbackSpeed;
+    }
+
+    if (this.isMockPlaying === false && this.mockPausedAt > 0) {
+      return this.mockPausedAt;
+    }
+
+    return this.pausedAt;
   }
 
   getDuration(): number {
@@ -181,12 +220,14 @@ export class AudioSystem {
   }
 
   seek(time: number): void {
-    if (this.isPlaying) {
+    const wasPlaying = this.isPlaying || this.isMockPlaying;
+    if (wasPlaying) {
       this.pause();
-      this.pausedAt = time;
+    }
+    this.pausedAt = time;
+    this.mockPausedAt = time;
+    if (wasPlaying) {
       this.resume();
-    } else {
-      this.pausedAt = time;
     }
   }
 

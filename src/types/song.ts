@@ -29,9 +29,13 @@ export interface Chart {
     offset: number;
   };
   difficulty: {
+    id?: string;
+    songId?: string;
     name: string;
     level: number;
     keys: 4 | 6;
+    noteCount?: number;
+    chartFile?: string;
   };
   notes: Note[];
   timingPoints?: TimingPoint[];
@@ -62,6 +66,7 @@ export interface Score {
   grade: string;
   timestamp: string;
   judgeHistory?: JudgeEvent[];
+  isFailed?: boolean;
 }
 
 export interface JudgeEvent {

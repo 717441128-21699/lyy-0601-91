@@ -35,7 +35,7 @@ const Result = () => {
   const animationRef = useRef<number | null>(null);
 
   const { songs, getBestScore, selectSong, selectDifficulty } = useSongStore();
-  const { stats } = useGameStore();
+  const { stats, resetGame } = useGameStore();
 
   const [currentScore, setCurrentScore] = useState<Score | null>(null);
   const [bestScore, setBestScore] = useState<Score | null>(null);
@@ -60,8 +60,9 @@ const Result = () => {
 
     const best = getBestScore(difficultyId);
     setBestScore(best);
+    const isFailed = gameStateParam === 'failed';
 
-    if (stats.score > 0) {
+    if (stats.score > 0 || isFailed) {
       const scoreData: Score = {
         id: `${songId}-${difficultyId}-${Date.now()}`,
         songId,
@@ -71,12 +72,13 @@ const Result = () => {
         perfect: stats.perfect,
         good: stats.good,
         miss: stats.miss,
-        grade: calculateGrade(stats.perfect, stats.good, stats.miss),
+        grade: isFailed ? 'F' : calculateGrade(stats.perfect, stats.good, stats.miss),
         timestamp: new Date().toISOString(),
         judgeHistory: stats.judgeHistory,
+        isFailed,
       };
       setCurrentScore(scoreData);
-      setIsNewBest(!best || stats.score > best.score);
+      setIsNewBest(!isFailed && (!best || stats.score > best.score));
     } else if (best) {
       setCurrentScore(best);
     }
@@ -241,11 +243,13 @@ const Result = () => {
 
   const handleRestart = () => {
     if (songId && difficultyId) {
+      resetGame();
       navigate(`/play/${songId}/${difficultyId}`);
     }
   };
 
   const handleBackToSelect = () => {
+    resetGame();
     navigate('/songs');
   };
 
@@ -255,6 +259,7 @@ const Result = () => {
     const nextSong = songs[nextIndex];
     if (nextSong && nextSong.difficulties.length > 0) {
       const nextDiff = nextSong.difficulties.find((d) => d.level === difficulty?.level) || nextSong.difficulties[0];
+      resetGame();
       navigate(`/play/${nextSong.id}/${nextDiff.id}`);
     }
   };
@@ -285,7 +290,13 @@ const Result = () => {
 
       <div className="relative h-full flex flex-col p-8 overflow-y-auto">
         <header className="text-center mb-8">
-          <h1 className="font-pixel text-3xl gradient-text glitch mb-2" data-text="STAGE CLEAR">
+          <h1
+            className={cn(
+              'font-pixel text-3xl glitch mb-2',
+              isFailed ? 'text-neon-red text-glow-pink' : 'gradient-text'
+            )}
+            data-text={isFailed ? 'STAGE FAILED' : 'STAGE CLEAR'}
+          >
             {isFailed ? 'STAGE FAILED' : 'STAGE CLEAR'}
           </h1>
           <div className="font-body text-xl text-gray-400">
@@ -298,7 +309,7 @@ const Result = () => {
 
         <div className="flex-1 flex gap-8 max-w-7xl mx-auto w-full">
           <div className="w-1/2 space-y-6">
-            <NeonCard glowColor="purple" className="p-8 text-center">
+            <NeonCard glowColor={isFailed ? 'red' : 'purple'} className="p-8 text-center">
               {isNewBest && !isFailed && (
                 <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-neon-yellow text-dark-bg font-pixel text-xs rounded-full animate-bounce">
                   NEW RECORD!
@@ -312,12 +323,12 @@ const Result = () => {
                 <div
                   className={cn(
                     'font-display font-black text-9xl',
-                    gradeStyle.color,
-                    gradeStyle.glow,
+                    isFailed ? 'text-neon-red text-glow-pink' : gradeStyle.color,
+                    isFailed ? '' : gradeStyle.glow,
                     'animate-pulse-glow'
                   )}
                 >
-                  {displayScore.grade}
+                  {isFailed ? 'F' : displayScore.grade}
                 </div>
               </div>
 

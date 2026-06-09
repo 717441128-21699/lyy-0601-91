@@ -19,13 +19,14 @@ const GamePlay = () => {
   const engineRef = useRef<GameEngine | null>(null);
   const animationRef = useRef<number | null>(null);
 
-  const { songs, selectedDifficulty, selectDifficulty, saveScore, getBestScore } = useSongStore();
+  const { songs, selectedDifficulty, selectDifficulty, saveScore, getBestScore, getChart } = useSongStore();
   const { settings } = useSettingsStore();
   const {
     gameState,
     stats,
     currentTime,
     showPauseMenu,
+    practiceSettings,
     setGameState,
     setStats,
     setCurrentTime,
@@ -39,7 +40,7 @@ const GamePlay = () => {
 
   const song = songs.find((s) => s.id === songId);
   const difficulty = song?.difficulties.find((d) => d.id === difficultyId) || selectedDifficulty;
-  const chart = difficulty ? getSampleChart(difficulty.id) : null;
+  const chart = difficulty ? (getChart(difficulty.id) || getSampleChart(difficulty.id)) : null;
 
   useEffect(() => {
     if (!song || !difficulty || !chart) {
@@ -56,60 +57,80 @@ const GamePlay = () => {
 
     const initEngine = async () => {
       if (!canvasRef.current) return;
-
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const keys = difficulty.keys as 4 | 6;
-      const laneWidth = Math.min(80, width / (keys + 2));
-
-      const renderConfig: RenderConfig = {
-        width,
-        height,
-        keys,
-        noteSpeed: settings.noteSpeed * 50,
-        judgeLineY: height * 0.8,
-        laneWidth,
-        noteHeight: 20,
-      };
-
-      const engineConfig: GameEngineConfig = {
-        renderConfig,
-        judgeConfig: {
-          perfectWindow: settings.judgeWindow.perfect,
-          goodWindow: settings.judgeWindow.good,
-        },
-        noteSpeed: settings.noteSpeed * 50,
-        inputOffset: settings.inputOffset,
-      };
-
-      engineRef.current = new GameEngine(canvasRef.current, engineConfig, audioSystem);
-      engineRef.current.loadChart(chart);
-      engineRef.current.setKeyMapping(
-        keys === 4 ? settings.keyMapping4 : settings.keyMapping6
-      );
-      engineRef.current.setInputOffset(settings.inputOffset);
-      engineRef.current.setNoteSpeed(settings.noteSpeed * 50);
-
-      engineRef.current.setOnStateChange((state: GameState) => {
-        queueMicrotask(() => {
-          setGameState(state);
-          if (state === 'finished' || state === 'failed') {
-            handleGameEnd(state);
+      
+      try {
+        if (song.audioFile) {
+          try {
+            await audioSystem.loadAudio(song.audioFile);
+          } catch (e) {
+            console.warn('音频加载失败，使用模拟播放:', e);
           }
+        }
+
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const keys = difficulty.keys as 4 | 6;
+        const laneWidth = Math.min(80, width / (keys + 2));
+
+        const renderConfig: RenderConfig = {
+          width,
+          height,
+          keys,
+          noteSpeed: settings.noteSpeed * 50,
+          judgeLineY: height * 0.8,
+          laneWidth,
+          noteHeight: 20,
+        };
+
+        const engineConfig: GameEngineConfig = {
+          renderConfig,
+          judgeConfig: {
+            perfectWindow: settings.judgeWindow.perfect,
+            goodWindow: settings.judgeWindow.good,
+          },
+          noteSpeed: settings.noteSpeed * 50,
+          inputOffset: settings.inputOffset,
+        };
+
+        engineRef.current = new GameEngine(canvasRef.current, engineConfig, audioSystem);
+        engineRef.current.loadChart(chart);
+        engineRef.current.setKeyMapping(
+          keys === 4 ? settings.keyMapping4 : settings.keyMapping6
+        );
+        engineRef.current.setInputOffset(settings.inputOffset);
+        engineRef.current.setNoteSpeed(settings.noteSpeed * 50);
+
+        if (practiceSettings) {
+          engineRef.current.setGameMode('practice');
+          engineRef.current.setPracticeSettings(practiceSettings);
+        } else {
+          engineRef.current.setGameMode('normal');
+        }
+
+        engineRef.current.setOnStateChange((state: GameState) => {
+          queueMicrotask(() => {
+            setGameState(state);
+            if (state === 'finished' || state === 'failed') {
+              handleGameEnd(state);
+            }
+          });
         });
-      });
 
-      engineRef.current.setOnStatsChange((newStats: GameStats) => {
-        queueMicrotask(() => {
-          setStats(newStats);
+        engineRef.current.setOnStatsChange((newStats: GameStats) => {
+          queueMicrotask(() => {
+            setStats(newStats);
+          });
         });
-      });
 
-      engineRef.current.setOnJudge((event: JudgeEvent) => {
-        // Track judge events for result curve
-      });
+        engineRef.current.setOnJudge((event: JudgeEvent) => {
+          // Track judge events for result curve
+        });
 
-      setIsReady(true);
+        setIsReady(true);
+      } catch (error) {
+        console.error('引擎初始化失败:', error);
+        setIsReady(true);
+      }
     };
 
     initEngine();
@@ -122,7 +143,7 @@ const GamePlay = () => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [song, difficulty, chart, settings, navigate, selectDifficulty, setGameState, setStats, setCurrentChart]);
+  }, [song, difficulty, chart, settings, navigate, selectDifficulty, setGameState, setStats, setCurrentChart, resetGame]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -163,7 +184,8 @@ const GamePlay = () => {
       if (!engineRef.current || !song || !difficulty) return;
 
       const finalStats = engineRef.current.getStats();
-      const grade = engineRef.current.getGrade();
+      const isFailed = state === 'failed';
+      const grade = isFailed ? 'F' : engineRef.current.getGrade();
 
       const scoreData: Score = {
         id: generateId(),
@@ -177,9 +199,12 @@ const GamePlay = () => {
         grade,
         timestamp: new Date().toISOString(),
         judgeHistory: finalStats.judgeHistory,
+        isFailed,
       };
 
-      saveScore(scoreData);
+      if (!isFailed) {
+        saveScore(scoreData);
+      }
 
       setTimeout(() => {
         navigate(`/result/${song.id}/${difficulty.id}?state=${state}`);

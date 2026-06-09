@@ -77,23 +77,127 @@ const PackManager = () => {
   const handleScanDirectory = async () => {
     setIsScanning(true);
     setImportProgress(0);
-    setImportStatus({ type: 'info', message: '正在扫描目录...' });
+    setImportStatus({ type: 'info', message: '请选择要扫描的目录...' });
     setLoading(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      setImportProgress(30);
+      if (directoryInputRef.current) {
+        directoryInputRef.current.onchange = async (e: Event) => {
+          const target = e.target as HTMLInputElement;
+          const files = target.files;
+          
+          if (!files || files.length === 0) {
+            setImportStatus({ type: 'info', message: '未选择文件' });
+            setIsScanning(false);
+            setLoading(false);
+            return;
+          }
 
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      setImportProgress(60);
+          setImportStatus({ type: 'info', message: `正在扫描 ${files.length} 个文件...` });
 
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      setImportProgress(100);
+          const jsonFiles = Array.from(files).filter((f) => f.name.endsWith('.json'));
+          
+          if (jsonFiles.length === 0) {
+            setImportStatus({ type: 'info', message: '未发现 JSON 谱面文件' });
+            setIsScanning(false);
+            setLoading(false);
+            return;
+          }
 
-      setImportStatus({ type: 'success', message: '扫描完成！未发现新曲包' });
+          let successCount = 0;
+          let failCount = 0;
+
+          for (let i = 0; i < jsonFiles.length; i++) {
+            const file = jsonFiles[i];
+            try {
+              const data = await readJsonFile(file);
+              const chart = parseJsonChart(data);
+
+              if (!chart.song || !chart.difficulty) {
+                failCount++;
+                continue;
+              }
+
+              const existingSong = songs.find(
+                (s) =>
+                  s.title.toLowerCase() === chart.song.title.toLowerCase() &&
+                  s.artist.toLowerCase() === chart.song.artist.toLowerCase()
+              );
+
+              const difficulty: Difficulty = {
+                id: generateId(),
+                songId: existingSong?.id || generateId(),
+                name: chart.difficulty.name,
+                level: chart.difficulty.level,
+                keys: chart.difficulty.keys,
+                noteCount: chart.notes.length,
+                chartFile: file.name,
+              };
+
+              if (existingSong) {
+                const existingDiff = existingSong.difficulties.find(
+                  (d) => d.name === difficulty.name && d.keys === difficulty.keys
+                );
+                if (!existingDiff) {
+                  existingSong.difficulties.push(difficulty);
+                }
+              } else {
+                const folderName = file.webkitRelativePath?.split('/')[0] || '导入';
+                const newSong: Song = {
+                  id: difficulty.songId,
+                  title: chart.song.title,
+                  artist: chart.song.artist,
+                  folder: folderName,
+                  audioFile: '',
+                  coverFile: '',
+                  bpm: chart.song.bpm,
+                  duration: Math.max(...chart.notes.map((n) => n.time + (n.duration || 0))) / 1000,
+                  difficulties: [difficulty],
+                };
+                const fullChart = {
+                  ...chart,
+                  difficulty: {
+                    ...chart.difficulty,
+                    id: difficulty.id,
+                    songId: difficulty.songId,
+                    noteCount: difficulty.noteCount,
+                    chartFile: difficulty.chartFile,
+                  },
+                };
+                addSong(newSong, fullChart);
+              }
+
+              successCount++;
+            } catch (err) {
+              failCount++;
+            }
+
+            setImportProgress(Math.round(((i + 1) / jsonFiles.length) * 100));
+          }
+
+          if (successCount > 0 && failCount === 0) {
+            setImportStatus({ type: 'success', message: `扫描完成！成功导入 ${successCount} 个谱面` });
+          } else if (successCount > 0) {
+            setImportStatus({
+              type: 'info',
+              message: `扫描完成：成功 ${successCount} 个，失败 ${failCount} 个`,
+            });
+          } else {
+            setImportStatus({ type: 'error', message: '未找到有效谱面' });
+          }
+
+          setIsScanning(false);
+          setLoading(false);
+          setTimeout(() => setImportProgress(0), 2000);
+          
+          if (directoryInputRef.current) {
+            directoryInputRef.current.value = '';
+          }
+        };
+        directoryInputRef.current.click();
+      }
     } catch (err) {
       setImportStatus({ type: 'error', message: '扫描失败，请重试' });
-    } finally {
       setIsScanning(false);
       setLoading(false);
       setTimeout(() => setImportProgress(0), 1000);
@@ -137,6 +241,17 @@ const PackManager = () => {
           chartFile: file.name,
         };
 
+        const fullChart = {
+          ...chart,
+          difficulty: {
+            ...chart.difficulty,
+            id: difficulty.id,
+            songId: difficulty.songId,
+            noteCount: difficulty.noteCount,
+            chartFile: difficulty.chartFile,
+          },
+        };
+
         if (existingSong) {
           const existingDiff = existingSong.difficulties.find(
             (d) => d.name === difficulty.name && d.keys === difficulty.keys
@@ -156,7 +271,7 @@ const PackManager = () => {
             duration: Math.max(...chart.notes.map((n) => n.time + (n.duration || 0))) / 1000,
             difficulties: [difficulty],
           };
-          addSong(newSong);
+          addSong(newSong, fullChart);
         }
 
         successCount++;

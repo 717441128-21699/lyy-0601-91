@@ -25,6 +25,7 @@ export class GameEngine {
   private animationFrameId: number | null = null;
   private mode: GameMode = 'normal';
   private practiceSettings: PracticeSettings | null = null;
+  private engineStartTime: number = 0;
 
   private judgeSystem: JudgeSystem;
   private renderer: GameRenderer;
@@ -131,6 +132,14 @@ export class GameEngine {
     this.inputListener = this.inputSystem.addListener(this.handleInput.bind(this));
 
     const startTime = this.practiceSettings?.startTime || 0;
+    this.engineStartTime = performance.now() - startTime;
+
+    if (this.practiceSettings?.speed) {
+      this.audioSystem.setPlaybackSpeed(this.practiceSettings.speed);
+    } else {
+      this.audioSystem.setPlaybackSpeed(1.0);
+    }
+
     this.audioSystem.play(startTime);
     this.currentTime = startTime;
 
@@ -262,7 +271,9 @@ export class GameEngine {
   }
 
   private finish(): void {
-    this.state = 'finished';
+    if (this.state !== 'failed') {
+      this.state = 'finished';
+    }
     this.audioSystem.stop();
     this.inputSystem.detach();
 
@@ -295,12 +306,13 @@ export class GameEngine {
   }
 
   private handleNoteHit(lane: number, hitTime: number): void {
+    const songTime = hitTime - this.engineStartTime;
     const notesInLane = this.notes.filter(
       (n) => n.lane === lane && !n.judged && !n.hit
     );
 
     for (const note of notesInLane) {
-      const result = this.judgeSystem.checkNoteHit(note, hitTime, this.currentTime);
+      const result = this.judgeSystem.checkNoteHit(note, songTime, this.currentTime);
       if (result) {
         this.processHit(note, result, lane);
         break;
@@ -364,13 +376,15 @@ export class GameEngine {
     this.audioSystem.playMissSound();
     this.renderer.spawnFloatingText('MISS', note.lane, COLORS.miss);
 
+    this.notifyStatsChange();
+    this.notifyJudge(judgeEvent);
+
     if (this.stats.energy <= 0 && this.mode === 'normal') {
       this.state = 'failed';
       this.finish();
+    } else if (this.stats.energy <= 0 && this.mode === 'practice') {
+      this.stats.energy = 50;
     }
-
-    this.notifyStatsChange();
-    this.notifyJudge(judgeEvent);
   }
 
   private render(deltaTime: number): void {
