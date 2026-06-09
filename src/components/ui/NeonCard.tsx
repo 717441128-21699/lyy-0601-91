@@ -2,7 +2,7 @@ import { HTMLAttributes, forwardRef } from 'react';
 import { cn } from '../../lib/utils';
 
 interface NeonCardProps extends HTMLAttributes<HTMLDivElement> {
-  glowColor?: 'pink' | 'cyan' | 'purple' | 'yellow' | 'red' | 'none';
+  glowColor?: 'pink' | 'cyan' | 'purple' | 'yellow' | 'red' | 'green' | 'none';
 }
 
 const NeonCard = forwardRef<HTMLDivElement, NeonCardProps>(
@@ -13,6 +13,7 @@ const NeonCard = forwardRef<HTMLDivElement, NeonCardProps>(
       purple: 'hover:shadow-neon-purple hover:border-neon-purple',
       yellow: 'hover:shadow-[0_0_10px_#FFD700,0_0_20px_#FFD700] hover:border-neon-yellow',
       red: 'hover:shadow-[0_0_10px_#FF3B3B,0_0_20px_#FF3B3B] hover:border-neon-red',
+      green: 'hover:shadow-[0_0_10px_#39FF14,0_0_20px_#39FF14] hover:border-neon-green',
       none: '',
     };
 

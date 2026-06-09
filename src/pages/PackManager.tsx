@@ -1,6 +1,6 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FolderOpen, Upload, Trash2, Music, Disc3, AlertCircle, CheckCircle, Loader2, Package, Sparkles } from 'lucide-react';
+import { ArrowLeft, FolderOpen, Upload, Trash2, Music, Disc3, AlertCircle, CheckCircle, Loader2, Package, Sparkles, Settings, Edit3 } from 'lucide-react';
 import NeonButton from '../components/ui/NeonButton';
 import NeonCard from '../components/ui/NeonCard';
 import StatDisplay from '../components/ui/StatDisplay';
@@ -11,6 +11,7 @@ import { readJsonFile } from '../utils/file';
 import { generateId } from '../utils/math';
 import { cn, formatTime } from '../lib/utils';
 import type { Song, Chart, Difficulty } from '../types/song';
+import type { ImportPreviewItem, ImportPreview } from '../store/songStore';
 
 interface ImportStatus {
   type: 'success' | 'error' | 'info';
@@ -25,7 +26,7 @@ interface PackInfo {
 
 const PackManager = () => {
   const navigate = useNavigate();
-  const { songs, addSong, removeSong, setLoading, isLoading } = useSongStore();
+  const { songs, addSong, removeSong, setLoading, isLoading, setImportPreview, isBuiltInSong, isBuiltInDifficulty } = useSongStore();
 
   const [selectedPack, setSelectedPack] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState(0);
@@ -35,6 +36,139 @@ const PackManager = () => {
 
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processFiles = useCallback(async (files: FileList | File[], source: 'scan' | 'import') => {
+    const fileArray = Array.isArray(files) ? files : Array.from(files);
+    const jsonFiles = fileArray.filter((f) => f.name.endsWith('.json'));
+
+    if (jsonFiles.length === 0) {
+      setImportStatus({ type: 'info', message: '未发现 JSON 谱面文件' });
+      return;
+    }
+
+    setImportStatus({ type: 'info', message: `正在解析 ${jsonFiles.length} 个谱面...` });
+
+    const previewItems: ImportPreviewItem[] = [];
+    let failCount = 0;
+
+    for (let i = 0; i < jsonFiles.length; i++) {
+      const file = jsonFiles[i];
+      try {
+        const data = await readJsonFile(file);
+        const chart = parseJsonChart(data);
+
+        if (!chart.song || !chart.difficulty) {
+          failCount++;
+          continue;
+        }
+
+        const existingSong = songs.find(
+          (s) =>
+            s.title.toLowerCase() === chart.song.title.toLowerCase() &&
+            s.artist.toLowerCase() === chart.song.artist.toLowerCase()
+        );
+
+        const difficultyId = generateId();
+        const songId = existingSong?.id || generateId();
+
+        const difficulty: Difficulty = {
+          id: difficultyId,
+          songId,
+          name: chart.difficulty.name,
+          level: chart.difficulty.level,
+          keys: chart.difficulty.keys,
+          noteCount: chart.notes.length,
+          chartFile: file.name,
+        };
+
+        const fullChart: Chart = {
+          ...chart,
+          difficulty: {
+            ...chart.difficulty,
+            id: difficultyId,
+            songId,
+            noteCount: difficulty.noteCount,
+            chartFile: difficulty.chartFile,
+          },
+        };
+
+        let action: 'new' | 'add' | 'replace' = 'new';
+        let existingDifficulty: Difficulty | undefined;
+
+        if (existingSong) {
+          existingDifficulty = existingSong.difficulties.find(
+            (d) => d.name === difficulty.name && d.keys === difficulty.keys
+          );
+          if (existingDifficulty) {
+            const isBuiltIn = isBuiltInDifficulty(existingSong.id, existingDifficulty.id);
+            if (isBuiltIn) {
+              failCount++;
+              continue;
+            }
+            action = 'replace';
+          } else {
+            action = 'add';
+          }
+        }
+
+        const folderName = source === 'scan'
+          ? (file as any).webkitRelativePath?.split('/')[0] || '导入'
+          : '导入';
+
+        const newSong: Song = existingSong
+          ? { ...existingSong, difficulties: [...existingSong.difficulties, difficulty] }
+          : {
+              id: songId,
+              title: chart.song.title,
+              artist: chart.song.artist,
+              folder: folderName,
+              audioFile: '',
+              coverFile: '',
+              bpm: chart.song.bpm,
+              duration: Math.max(...chart.notes.map((n) => n.time + (n.duration || 0))) / 1000,
+              difficulties: [difficulty],
+            };
+
+        previewItems.push({
+          song: newSong,
+          chart: fullChart,
+          action,
+          existingDifficulty,
+        });
+      } catch (err) {
+        failCount++;
+      }
+
+      setImportProgress(Math.round(((i + 1) / jsonFiles.length) * 100));
+    }
+
+    const newSongs = previewItems.filter((item) => item.action === 'new').length;
+    const addedDifficulties = previewItems.filter((item) => item.action === 'add').length;
+    const replacedDifficulties = previewItems.filter((item) => item.action === 'replace').length;
+
+    const preview: ImportPreview = {
+      items: previewItems,
+      newSongs,
+      addedDifficulties,
+      replacedDifficulties,
+    };
+
+    setImportPreview(preview);
+
+    if (previewItems.length > 0) {
+      setImportStatus({
+        type: 'success',
+        message: `解析完成：${previewItems.length} 个有效，${failCount} 个失败`,
+      });
+      setTimeout(() => {
+        navigate('/import-confirm');
+      }, 500);
+    } else {
+      setImportStatus({ type: 'error', message: '未找到有效谱面' });
+    }
+
+    setTimeout(() => setImportProgress(0), 2000);
+  }, [songs, isBuiltInDifficulty, setImportPreview, navigate]);
 
   const packs = useMemo<PackInfo[]>(() => {
     const packMap = new Map<string, Song[]>();
@@ -85,7 +219,7 @@ const PackManager = () => {
         directoryInputRef.current.onchange = async (e: Event) => {
           const target = e.target as HTMLInputElement;
           const files = target.files;
-          
+
           if (!files || files.length === 0) {
             setImportStatus({ type: 'info', message: '未选择文件' });
             setIsScanning(false);
@@ -94,107 +228,11 @@ const PackManager = () => {
           }
 
           setImportStatus({ type: 'info', message: `正在扫描 ${files.length} 个文件...` });
-
-          const jsonFiles = Array.from(files).filter((f) => f.name.endsWith('.json'));
-          
-          if (jsonFiles.length === 0) {
-            setImportStatus({ type: 'info', message: '未发现 JSON 谱面文件' });
-            setIsScanning(false);
-            setLoading(false);
-            return;
-          }
-
-          let successCount = 0;
-          let failCount = 0;
-
-          for (let i = 0; i < jsonFiles.length; i++) {
-            const file = jsonFiles[i];
-            try {
-              const data = await readJsonFile(file);
-              const chart = parseJsonChart(data);
-
-              if (!chart.song || !chart.difficulty) {
-                failCount++;
-                continue;
-              }
-
-              const existingSong = songs.find(
-                (s) =>
-                  s.title.toLowerCase() === chart.song.title.toLowerCase() &&
-                  s.artist.toLowerCase() === chart.song.artist.toLowerCase()
-              );
-
-              const difficulty: Difficulty = {
-                id: generateId(),
-                songId: existingSong?.id || generateId(),
-                name: chart.difficulty.name,
-                level: chart.difficulty.level,
-                keys: chart.difficulty.keys,
-                noteCount: chart.notes.length,
-                chartFile: file.name,
-              };
-
-              const fullChart = {
-                ...chart,
-                difficulty: {
-                  ...chart.difficulty,
-                  id: difficulty.id,
-                  songId: difficulty.songId,
-                  noteCount: difficulty.noteCount,
-                  chartFile: difficulty.chartFile,
-                },
-              };
-
-              if (existingSong) {
-                const existingDiff = existingSong.difficulties.find(
-                  (d) => d.name === difficulty.name && d.keys === difficulty.keys
-                );
-                if (!existingDiff) {
-                  const updatedSong: Song = {
-                    ...existingSong,
-                    difficulties: [...existingSong.difficulties, difficulty],
-                  };
-                  addSong(updatedSong, fullChart);
-                }
-              } else {
-                const folderName = file.webkitRelativePath?.split('/')[0] || '导入';
-                const newSong: Song = {
-                  id: difficulty.songId,
-                  title: chart.song.title,
-                  artist: chart.song.artist,
-                  folder: folderName,
-                  audioFile: '',
-                  coverFile: '',
-                  bpm: chart.song.bpm,
-                  duration: Math.max(...chart.notes.map((n) => n.time + (n.duration || 0))) / 1000,
-                  difficulties: [difficulty],
-                };
-                addSong(newSong, fullChart);
-              }
-
-              successCount++;
-            } catch (err) {
-              failCount++;
-            }
-
-            setImportProgress(Math.round(((i + 1) / jsonFiles.length) * 100));
-          }
-
-          if (successCount > 0 && failCount === 0) {
-            setImportStatus({ type: 'success', message: `扫描完成！成功导入 ${successCount} 个谱面` });
-          } else if (successCount > 0) {
-            setImportStatus({
-              type: 'info',
-              message: `扫描完成：成功 ${successCount} 个，失败 ${failCount} 个`,
-            });
-          } else {
-            setImportStatus({ type: 'error', message: '未找到有效谱面' });
-          }
+          await processFiles(files, 'scan');
 
           setIsScanning(false);
           setLoading(false);
-          setTimeout(() => setImportProgress(0), 2000);
-          
+
           if (directoryInputRef.current) {
             directoryInputRef.current.value = '';
           }
@@ -217,97 +255,12 @@ const PackManager = () => {
     setImportStatus({ type: 'info', message: `正在导入 ${files.length} 个谱面...` });
     setLoading(true);
 
-    let successCount = 0;
-    let failCount = 0;
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const data = await readJsonFile(file);
-        const chart = parseJsonChart(data);
-
-        if (!chart.song || !chart.difficulty) {
-          throw new Error('谱面格式不正确');
-        }
-
-        const existingSong = songs.find(
-          (s) =>
-            s.title.toLowerCase() === chart.song.title.toLowerCase() &&
-            s.artist.toLowerCase() === chart.song.artist.toLowerCase()
-        );
-
-        const difficulty: Difficulty = {
-          id: generateId(),
-          songId: existingSong?.id || generateId(),
-          name: chart.difficulty.name,
-          level: chart.difficulty.level,
-          keys: chart.difficulty.keys,
-          noteCount: chart.notes.length,
-          chartFile: file.name,
-        };
-
-        const fullChart = {
-          ...chart,
-          difficulty: {
-            ...chart.difficulty,
-            id: difficulty.id,
-            songId: difficulty.songId,
-            noteCount: difficulty.noteCount,
-            chartFile: difficulty.chartFile,
-          },
-        };
-
-        if (existingSong) {
-          const existingDiff = existingSong.difficulties.find(
-            (d) => d.name === difficulty.name && d.keys === difficulty.keys
-          );
-          if (!existingDiff) {
-            const updatedSong: Song = {
-              ...existingSong,
-              difficulties: [...existingSong.difficulties, difficulty],
-            };
-            addSong(updatedSong, fullChart);
-          }
-        } else {
-          const newSong: Song = {
-            id: difficulty.songId,
-            title: chart.song.title,
-            artist: chart.song.artist,
-            folder: '导入',
-            audioFile: '',
-            coverFile: '',
-            bpm: chart.song.bpm,
-            duration: Math.max(...chart.notes.map((n) => n.time + (n.duration || 0))) / 1000,
-            difficulties: [difficulty],
-          };
-          addSong(newSong, fullChart);
-        }
-
-        successCount++;
-      } catch (err) {
-        failCount++;
-        console.error(`导入 ${file.name} 失败:`, err);
-      }
-
-      setImportProgress(Math.round(((i + 1) / files.length) * 100));
-    }
-
-    if (successCount > 0 && failCount === 0) {
-      setImportStatus({ type: 'success', message: `成功导入 ${successCount} 个谱面！` });
-    } else if (successCount > 0) {
-      setImportStatus({
-        type: 'info',
-        message: `导入完成：成功 ${successCount} 个，失败 ${failCount} 个`,
-      });
-    } else {
-      setImportStatus({ type: 'error', message: '导入失败，请检查谱面格式' });
-    }
+    await processFiles(files, 'import');
 
     setLoading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-    setTimeout(() => setImportProgress(0), 2000);
   };
 
   const handleDeleteSong = (songId: string) => {
@@ -535,6 +488,7 @@ const PackManager = () => {
                       0
                     );
                     const maxLevel = Math.max(...song.difficulties.map((d) => d.level));
+                    const songIsBuiltIn = isBuiltInSong(song.id);
 
                     return (
                       <NeonCard
@@ -550,19 +504,35 @@ const PackManager = () => {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between">
                               <div>
-                                <h4 className="font-display font-bold text-xl text-white truncate group-hover:text-neon-cyan transition-colors">
-                                  {song.title}
-                                </h4>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-display font-bold text-xl text-white truncate group-hover:text-neon-cyan transition-colors">
+                                    {song.title}
+                                  </h4>
+                                  {songIsBuiltIn && (
+                                    <span className="px-2 py-0.5 rounded text-xs font-pixel bg-neon-purple/20 text-neon-purple border border-neon-purple/30">
+                                      内置
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="font-body text-neon-pink">{song.artist}</p>
                               </div>
                               <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <NeonButton
-                                  variant="danger"
+                                  variant="secondary"
                                   size="sm"
-                                  onClick={() => setShowDeleteConfirm(song.id)}
+                                  onClick={() => navigate(`/difficulty-manage/${song.id}`)}
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Settings className="w-4 h-4" />
                                 </NeonButton>
+                                {!songIsBuiltIn && (
+                                  <NeonButton
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => setShowDeleteConfirm(song.id)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </NeonButton>
+                                )}
                               </div>
                             </div>
 
@@ -602,24 +572,30 @@ const PackManager = () => {
                             </div>
 
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
-                              {song.difficulties.map((diff) => (
-                                <div
-                                  key={diff.id}
-                                  className={cn(
-                                    'px-3 py-1 rounded-md text-xs font-display font-bold border',
-                                    getDifficultyColor(diff.level) === 'green' &&
-                                      'border-neon-green text-neon-green bg-neon-green/10',
-                                    getDifficultyColor(diff.level) === 'cyan' &&
-                                      'border-neon-cyan text-neon-cyan bg-neon-cyan/10',
-                                    getDifficultyColor(diff.level) === 'pink' &&
-                                      'border-neon-pink text-neon-pink bg-neon-pink/10',
-                                    getDifficultyColor(diff.level) === 'red' &&
-                                      'border-neon-red text-neon-red bg-neon-red/10'
-                                  )}
-                                >
-                                  {diff.name} · Lv.{diff.level} · {diff.keys}K
-                                </div>
-                              ))}
+                              {song.difficulties.map((diff) => {
+                                const diffIsBuiltIn = isBuiltInDifficulty(song.id, diff.id);
+                                return (
+                                  <div
+                                    key={diff.id}
+                                    className={cn(
+                                      'px-3 py-1 rounded-md text-xs font-display font-bold border flex items-center gap-1',
+                                      getDifficultyColor(diff.level) === 'green' &&
+                                        'border-neon-green text-neon-green bg-neon-green/10',
+                                      getDifficultyColor(diff.level) === 'cyan' &&
+                                        'border-neon-cyan text-neon-cyan bg-neon-cyan/10',
+                                      getDifficultyColor(diff.level) === 'pink' &&
+                                        'border-neon-pink text-neon-pink bg-neon-pink/10',
+                                      getDifficultyColor(diff.level) === 'red' &&
+                                        'border-neon-red text-neon-red bg-neon-red/10'
+                                    )}
+                                  >
+                                    {diff.name} · Lv.{diff.level} · {diff.keys}K
+                                    {diffIsBuiltIn && (
+                                      <span className="text-[10px] opacity-60">(内置)</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         </div>

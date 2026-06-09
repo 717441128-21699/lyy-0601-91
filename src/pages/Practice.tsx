@@ -1,18 +1,25 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Repeat, Gauge, Music, Clock, Target, Zap, Volume2 } from 'lucide-react';
+import { ArrowLeft, Play, Repeat, Gauge, Music, Clock, Target, Zap, Volume2, Flag, MapPin } from 'lucide-react';
 import NeonButton from '../components/ui/NeonButton';
 import NeonCard from '../components/ui/NeonCard';
 import StatDisplay from '../components/ui/StatDisplay';
 import { useSongStore } from '../store/songStore';
 import { useGameStore } from '../store/gameStore';
 import { cn, formatTime } from '../lib/utils';
-import type { Difficulty, PracticeSettings } from '../types/song';
+import type { Difficulty, PracticeSettings, Note } from '../types/song';
+
+interface SectionMarker {
+  startTime: number;
+  endTime: number;
+  density: number;
+  label: string;
+}
 
 const Practice = () => {
   const navigate = useNavigate();
   const { songId } = useParams<{ songId: string }>();
-  const { songs, selectDifficulty, selectedDifficulty } = useSongStore();
+  const { songs, selectDifficulty, selectedDifficulty, getChart } = useSongStore();
   const { setPracticeSettings } = useGameStore();
 
   const [selectedDiff, setSelectedDiff] = useState<Difficulty | null>(null);
@@ -25,6 +32,11 @@ const Practice = () => {
     return songs.find((s) => s.id === songId) || null;
   }, [songs, songId]);
 
+  const currentChart = useMemo(() => {
+    if (!selectedDiff) return null;
+    return getChart(selectedDiff.id);
+  }, [selectedDiff, getChart]);
+
   useEffect(() => {
     if (song) {
       setEndTime(song.duration * 1000);
@@ -34,19 +46,113 @@ const Practice = () => {
     }
   }, [song, selectedDiff]);
 
+  const calculateNoteDensity = useCallback((notes: Note[], durationMs: number, windowSize: number = 5000) => {
+    const densityMap: number[] = [];
+    const numWindows = Math.ceil(durationMs / windowSize);
+
+    for (let i = 0; i < numWindows; i++) {
+      const windowStart = i * windowSize;
+      const windowEnd = windowStart + windowSize;
+      const notesInWindow = notes.filter(
+        (n) => n.time >= windowStart && n.time < windowEnd
+      ).length;
+      densityMap.push(notesInWindow);
+    }
+
+    return densityMap;
+  }, []);
+
+  const findDenseSections = useCallback((notes: Note[], durationMs: number): SectionMarker[] => {
+    if (notes.length === 0) return [];
+
+    const windowSize = 5000;
+    const densityMap = calculateNoteDensity(notes, durationMs, windowSize);
+    const avgDensity = densityMap.reduce((a, b) => a + b, 0) / densityMap.length;
+    const threshold = avgDensity * 1.5;
+
+    const markers: SectionMarker[] = [];
+    let inDenseSection = false;
+    let sectionStart = 0;
+    let sectionMaxDensity = 0;
+
+    for (let i = 0; i < densityMap.length; i++) {
+      const density = densityMap[i];
+      const time = i * windowSize;
+
+      if (density >= threshold && !inDenseSection) {
+        inDenseSection = true;
+        sectionStart = time;
+        sectionMaxDensity = density;
+      } else if (density >= threshold && inDenseSection) {
+        sectionMaxDensity = Math.max(sectionMaxDensity, density);
+      } else if (density < threshold && inDenseSection) {
+        inDenseSection = false;
+        const sectionEnd = Math.min(time + windowSize, durationMs);
+        if (sectionEnd - sectionStart >= 4000) {
+          markers.push({
+            startTime: sectionStart,
+            endTime: sectionEnd,
+            density: sectionMaxDensity,
+            label: `段落 ${markers.length + 1}`,
+          });
+        }
+        sectionMaxDensity = 0;
+      }
+    }
+
+    if (inDenseSection) {
+      const sectionEnd = durationMs;
+      if (sectionEnd - sectionStart >= 4000) {
+        markers.push({
+          startTime: sectionStart,
+          endTime: sectionEnd,
+          density: sectionMaxDensity,
+          label: `段落 ${markers.length + 1}`,
+        });
+      }
+    }
+
+    return markers.sort((a, b) => b.density - a.density).slice(0, 5);
+  }, [calculateNoteDensity]);
+
   const waveformData = useMemo(() => {
     if (!song) return [];
-    const bars = 100;
-    return Array.from({ length: bars }, (_, i) => {
-      const baseHeight = 30 + Math.sin(i * 0.3) * 20 + Math.random() * 30;
-      const timeInSection = (i / bars) * (endTime - startTime) + startTime;
-      const inRange = timeInSection >= startTime && timeInSection <= endTime;
+    const bars = 200;
+    const durationMs = song.duration * 1000;
+
+    if (!currentChart || currentChart.notes.length === 0) {
+      return Array.from({ length: bars }, (_, i) => {
+        const baseHeight = 30 + Math.sin(i * 0.3) * 20 + Math.random() * 30;
+        const timeInSection = (i / bars) * (endTime - startTime) + startTime;
+        const inRange = timeInSection >= startTime && timeInSection <= endTime;
+        return {
+          height: Math.min(100, Math.max(10, baseHeight)),
+          inRange,
+          time: (i / bars) * durationMs,
+        };
+      });
+    }
+
+    const notes = currentChart.notes;
+    const densityMap = calculateNoteDensity(notes, durationMs, durationMs / bars);
+    const maxDensity = Math.max(...densityMap, 1);
+
+    return densityMap.map((density, i) => {
+      const time = (i / bars) * durationMs;
+      const inRange = time >= startTime && time <= endTime;
+      const normalizedHeight = (density / maxDensity) * 90 + 10;
       return {
-        height: Math.min(100, Math.max(10, baseHeight)),
+        height: normalizedHeight,
         inRange,
+        time,
       };
     });
-  }, [song, startTime, endTime]);
+  }, [song, startTime, endTime, currentChart, calculateNoteDensity]);
+
+  const sectionMarkers = useMemo(() => {
+    if (!song || !currentChart) return [];
+    return findDenseSections(currentChart.notes, song.duration * 1000);
+  }, [song, currentChart, findDenseSections]);
 
   const handleDifficultySelect = (diff: Difficulty) => {
     setSelectedDiff(diff);
@@ -68,6 +174,11 @@ const Practice = () => {
 
   const handleSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSpeed(parseFloat(e.target.value));
+  };
+
+  const handleMarkerClick = (marker: SectionMarker) => {
+    setStartTime(marker.startTime);
+    setEndTime(marker.endTime);
   };
 
   const handleStartPractice = () => {
@@ -139,6 +250,14 @@ const Practice = () => {
                 color="pink"
                 className="px-4"
               />
+              {currentChart && (
+                <StatDisplay
+                  label="音符"
+                  value={currentChart.notes.length.toLocaleString()}
+                  color="green"
+                  className="px-4"
+                />
+              )}
             </div>
           )}
         </header>
@@ -169,6 +288,7 @@ const Practice = () => {
                   const color = getDifficultyColor(diff.level);
                   const borderClass = getDifficultyBorderClass(diff.level);
                   const isSelected = selectedDiff?.id === diff.id;
+                  const hasChart = getChart(diff.id);
 
                   return (
                     <NeonCard
@@ -194,7 +314,7 @@ const Practice = () => {
                           <div>
                             <div className="font-display font-bold">{diff.name}</div>
                             <div className="text-xs font-body text-gray-500">
-                              {diff.noteCount} 音符
+                              {diff.noteCount} 音符 {hasChart ? '' : '(无谱面)'}
                             </div>
                           </div>
                         </div>
@@ -237,8 +357,8 @@ const Practice = () => {
                 </h3>
 
                 <div className="mb-8">
-                  <div className="relative h-32 bg-dark-panel rounded-lg overflow-hidden mb-4">
-                    <div className="absolute inset-0 flex items-end justify-around px-2 pb-2">
+                  <div className="relative h-48 bg-dark-panel rounded-lg overflow-hidden mb-4">
+                    <div className="absolute inset-0 flex items-end justify-around px-1 pb-2">
                       {waveformData.map((bar, i) => (
                         <div
                           key={i}
@@ -256,8 +376,33 @@ const Practice = () => {
                       ))}
                     </div>
 
+                    {sectionMarkers.map((marker, idx) => (
+                      <div
+                        key={idx}
+                        className="absolute top-0 bottom-0 border-l-2 border-dashed cursor-pointer group"
+                        style={{
+                          left: `${(marker.startTime / durationMs) * 100}%`,
+                          width: `${((marker.endTime - marker.startTime) / durationMs) * 100}%`,
+                        }}
+                        onClick={() => handleMarkerClick(marker)}
+                      >
+                        <div
+                          className="absolute -top-1 left-0 right-0 h-2 bg-neon-yellow/40 group-hover:bg-neon-yellow/60 transition-colors"
+                          style={{
+                            borderColor: '#FFD700',
+                          }}
+                        />
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                          <span className="px-2 py-1 rounded bg-neon-yellow text-dark-bg text-xs font-pixel font-bold flex items-center gap-1">
+                            <Flag className="w-3 h-3" />
+                            {marker.label} · {formatTime(marker.startTime)}-{formatTime(marker.endTime)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+
                     <div
-                      className="absolute top-0 bottom-0 w-0.5 bg-neon-pink"
+                      className="absolute top-0 bottom-0 w-0.5 bg-neon-pink z-10"
                       style={{
                         left: `${(startTime / durationMs) * 100}%`,
                         boxShadow: '0 0 10px #FF2D95',
@@ -269,7 +414,7 @@ const Practice = () => {
                     </div>
 
                     <div
-                      className="absolute top-0 bottom-0 w-0.5 bg-neon-green"
+                      className="absolute top-0 bottom-0 w-0.5 bg-neon-green z-10"
                       style={{
                         left: `${(endTime / durationMs) * 100}%`,
                         boxShadow: '0 0 10px #00FF88',
@@ -281,7 +426,7 @@ const Practice = () => {
                     </div>
 
                     <div
-                      className="absolute top-0 bottom-0 bg-gradient-to-r from-neon-cyan/20 to-neon-green/20"
+                      className="absolute top-0 bottom-0 bg-gradient-to-r from-neon-cyan/20 to-neon-green/20 z-0"
                       style={{
                         left: `${(startTime / durationMs) * 100}%`,
                         width: `${((endTime - startTime) / durationMs) * 100}%`,
@@ -371,6 +516,38 @@ const Practice = () => {
                     </NeonButton>
                   </div>
                 </div>
+
+                {sectionMarkers.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-dark-border">
+                    <h4 className="font-pixel text-sm text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      <MapPin className="w-4 h-4 text-neon-yellow" />
+                      高密度段落标记
+                      <span className="text-xs text-gray-500">(点击快速选择)</span>
+                    </h4>
+                    <div className="grid grid-cols-5 gap-2">
+                      {sectionMarkers.map((marker, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleMarkerClick(marker)}
+                          className={cn(
+                            'p-3 rounded-lg border-2 text-center transition-all hover:scale-105',
+                            startTime === marker.startTime && endTime === marker.endTime
+                              ? 'border-neon-yellow bg-neon-yellow/20 shadow-neon-yellow'
+                              : 'border-dark-border bg-dark-panel hover:border-neon-yellow/50'
+                          )}
+                        >
+                          <div className="font-pixel text-xs text-neon-yellow mb-1">{marker.label}</div>
+                          <div className="font-display text-sm text-white">
+                            {formatTime(marker.startTime)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {formatTime(marker.endTime - marker.startTime)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </NeonCard>
 
               <div className="grid grid-cols-2 gap-6 mb-6">

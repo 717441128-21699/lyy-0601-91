@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Music, Gauge, Keyboard, Zap, Star } from 'lucide-react';
+import { ArrowLeft, Music, Gauge, Keyboard, Zap, Star, Wrench } from 'lucide-react';
 import NeonButton from '../components/ui/NeonButton';
 import NeonCard from '../components/ui/NeonCard';
 import StatDisplay from '../components/ui/StatDisplay';
@@ -90,7 +90,7 @@ const DifficultySelect = () => {
                 <h2 className="font-display font-bold text-3xl text-white mb-2">{song.title}</h2>
                 <p className="font-body text-lg text-neon-cyan mb-4">{song.artist}</p>
 
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-4 gap-4 mb-4">
                   <StatDisplay label="BPM" value={song.bpm} color="yellow" />
                   <StatDisplay
                     label="时长"
@@ -107,6 +107,17 @@ const DifficultySelect = () => {
                     value={`L${Math.max(...song.difficulties.map((d) => d.level))}`}
                     color="purple"
                   />
+                </div>
+
+                <div className="flex gap-3">
+                  <NeonButton
+                    variant="secondary"
+                    className="flex-1 flex items-center justify-center gap-2"
+                    onClick={() => navigate(`/difficulty-manage/${song.id}`)}
+                  >
+                    <Wrench className="w-4 h-4" />
+                    难度管理
+                  </NeonButton>
                 </div>
               </div>
             </div>

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Settings, FolderOpen, Music, Filter, Zap, ArrowRight } from 'lucide-react';
+import { Search, Settings, FolderOpen, Music, Filter, Zap, ArrowRight, Wrench } from 'lucide-react';
 import SongCard from '../components/SongSelect/SongCard';
 import NeonButton from '../components/ui/NeonButton';
 import NeonCard from '../components/ui/NeonCard';
@@ -262,13 +262,24 @@ const SongSelect = () => {
                     <ArrowRight className="w-5 h-5" />
                   </NeonButton>
 
-                  <NeonButton
-                    variant="secondary"
-                    className="w-full"
-                    onClick={handlePracticeMode}
-                  >
-                    练习模式
-                  </NeonButton>
+                  <div className="grid grid-cols-2 gap-3">
+                    <NeonButton
+                      variant="secondary"
+                      className="w-full"
+                      onClick={handlePracticeMode}
+                    >
+                      练习模式
+                    </NeonButton>
+
+                    <NeonButton
+                      variant="secondary"
+                      className="w-full flex items-center justify-center gap-2"
+                      onClick={() => selectedSong && navigate(`/difficulty-manage/${selectedSong.id}`)}
+                    >
+                      <Wrench className="w-4 h-4" />
+                      难度管理
+                    </NeonButton>
+                  </div>
                 </div>
               </div>
             ) : (
