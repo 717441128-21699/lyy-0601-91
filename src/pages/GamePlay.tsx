@@ -22,18 +22,19 @@ const GamePlay = () => {
   const { songs, selectedDifficulty, selectDifficulty, saveScore, getBestScore, getChart } = useSongStore();
   const { settings } = useSettingsStore();
   const {
-    gameState,
-    stats,
-    currentTime,
-    showPauseMenu,
-    practiceSettings,
-    setGameState,
-    setStats,
-    setCurrentTime,
-    setShowPauseMenu,
-    setCurrentChart,
-    resetGame,
-  } = useGameStore();
+      gameState,
+      stats,
+      currentTime,
+      showPauseMenu,
+      practiceSettings,
+      setGameState,
+      setStats,
+      setCurrentTime,
+      setShowPauseMenu,
+      setCurrentChart,
+      setPracticeSettings,
+      resetGame,
+    } = useGameStore();
 
   const [countdown, setCountdown] = useState(3);
   const [isReady, setIsReady] = useState(false);
@@ -99,11 +100,13 @@ const GamePlay = () => {
         );
         engineRef.current.setInputOffset(settings.inputOffset);
         engineRef.current.setNoteSpeed(settings.noteSpeed * 50);
+        audioSystem.setPlaybackSpeed(1.0);
 
         if (practiceSettings) {
           engineRef.current.setGameMode('practice');
           engineRef.current.setPracticeSettings(practiceSettings);
         } else {
+          setPracticeSettings(null);
           engineRef.current.setGameMode('normal');
         }
 
@@ -145,8 +148,30 @@ const GamePlay = () => {
     };
   }, [song, difficulty, chart, settings, navigate, selectDifficulty, setGameState, setStats, setCurrentChart, resetGame]);
 
+  const startGame = useCallback(() => {
+    if (engineRef.current) {
+      const startTime = practiceSettings?.startTime || 0;
+      setCurrentTime(startTime);
+      engineRef.current.start();
+    }
+  }, [practiceSettings, setCurrentTime]);
+
+  const startUpdateLoop = useCallback(() => {
+    const update = () => {
+      if (engineRef.current) {
+        if (gameState === 'playing' || gameState === 'paused' || gameState === 'ready') {
+          setCurrentTime(engineRef.current.getCurrentTime());
+        }
+      }
+      animationRef.current = requestAnimationFrame(update);
+    };
+    animationRef.current = requestAnimationFrame(update);
+  }, [gameState, setCurrentTime]);
+
   useEffect(() => {
     if (!isReady) return;
+
+    startUpdateLoop();
 
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -160,29 +185,13 @@ const GamePlay = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isReady]);
-
-  const startGame = useCallback(() => {
-    if (engineRef.current) {
-      engineRef.current.start();
-      startUpdateLoop();
-    }
-  }, []);
-
-  const startUpdateLoop = useCallback(() => {
-    const update = () => {
-      if (engineRef.current && gameState === 'playing') {
-        setCurrentTime(engineRef.current.getCurrentTime());
-      }
-      animationRef.current = requestAnimationFrame(update);
-    };
-    animationRef.current = requestAnimationFrame(update);
-  }, [gameState, setCurrentTime]);
+  }, [isReady, startUpdateLoop, startGame]);
 
   const handleGameEnd = useCallback(
     (state: GameState) => {
       if (!engineRef.current || !song || !difficulty) return;
 
+      setCurrentTime(engineRef.current.getCurrentTime());
       const finalStats = engineRef.current.getStats();
       const isFailed = state === 'failed';
       const grade = isFailed ? 'F' : engineRef.current.getGrade();
@@ -239,8 +248,9 @@ const GamePlay = () => {
     if (engineRef.current) {
       engineRef.current.stop();
     }
+    resetGame();
     navigate('/');
-  }, [navigate]);
+  }, [navigate, resetGame]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

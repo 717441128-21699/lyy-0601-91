@@ -306,13 +306,12 @@ export class GameEngine {
   }
 
   private handleNoteHit(lane: number, hitTime: number): void {
-    const songTime = hitTime - this.engineStartTime;
     const notesInLane = this.notes.filter(
       (n) => n.lane === lane && !n.judged && !n.hit
     );
 
     for (const note of notesInLane) {
-      const result = this.judgeSystem.checkNoteHit(note, songTime, this.currentTime);
+      const result = this.judgeSystem.checkNoteHit(note, this.currentTime, this.currentTime);
       if (result) {
         this.processHit(note, result, lane);
         break;

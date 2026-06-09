@@ -81,7 +81,37 @@ export const useSongStore = create<SongState>((set, get) => ({
   addSong: (song, chart) =>
     set((state) => {
       const customSongs = state.songs.filter((s) => !SAMPLE_SONGS.find((ss) => ss.id === s.id));
-      const newCustomSongs = [...customSongs, song];
+      const existingCustomSong = customSongs.find((s) => s.id === song.id);
+      const existingSampleSong = SAMPLE_SONGS.find((s) => s.id === song.id);
+      const existingSong = existingCustomSong || existingSampleSong;
+
+      let newCustomSongs: Song[];
+      let newSongs: Song[];
+
+      if (existingSong) {
+        const mergedDifficulties = [
+          ...existingSong.difficulties.filter(
+            (d) => !song.difficulties.find((nd) => nd.id === d.id)
+          ),
+          ...song.difficulties,
+        ];
+
+        if (existingCustomSong) {
+          const updatedSong = { ...existingCustomSong, difficulties: mergedDifficulties };
+          newCustomSongs = customSongs.map((s) => (s.id === song.id ? updatedSong : s));
+          newSongs = [...SAMPLE_SONGS, ...newCustomSongs];
+        } else {
+          newCustomSongs = customSongs;
+          const updatedSampleSongs = SAMPLE_SONGS.map((s) =>
+            s.id === song.id ? { ...s, difficulties: mergedDifficulties } : s
+          );
+          newSongs = [...updatedSampleSongs, ...newCustomSongs];
+        }
+      } else {
+        newCustomSongs = [...customSongs, song];
+        newSongs = [...SAMPLE_SONGS, ...newCustomSongs];
+      }
+
       saveCustomSongsToStorage(newCustomSongs);
 
       const newCharts = { ...state.customCharts };
@@ -91,7 +121,7 @@ export const useSongStore = create<SongState>((set, get) => ({
       }
 
       return {
-        songs: [...SAMPLE_SONGS, ...newCustomSongs],
+        songs: newSongs,
         customCharts: newCharts,
       };
     }),

@@ -6,6 +6,7 @@ import NeonCard from '../components/ui/NeonCard';
 import StatDisplay from '../components/ui/StatDisplay';
 import { useSongStore } from '../store/songStore';
 import { useSettingsStore } from '../store/settingsStore';
+import { useGameStore } from '../store/gameStore';
 import { cn, formatTime } from '../lib/utils';
 import { getSampleChart } from '../data/sampleSongs';
 import type { Difficulty } from '../types/song';
@@ -15,6 +16,7 @@ const DifficultySelect = () => {
   const { songId } = useParams();
   const { songs, selectDifficulty, getBestScore } = useSongStore();
   const { settings } = useSettingsStore();
+  const { resetGame } = useGameStore();
 
   const [selectedKeys, setSelectedKeys] = useState<4 | 6>(4);
 
@@ -34,6 +36,7 @@ const DifficultySelect = () => {
 
   const handleDifficultySelect = (diff: Difficulty) => {
     selectDifficulty(diff);
+    resetGame();
     const chart = getSampleChart(diff.id);
     if (chart) {
       navigate(`/play/${song.id}/${diff.id}`);

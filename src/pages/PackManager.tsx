@@ -134,12 +134,27 @@ const PackManager = () => {
                 chartFile: file.name,
               };
 
+              const fullChart = {
+                ...chart,
+                difficulty: {
+                  ...chart.difficulty,
+                  id: difficulty.id,
+                  songId: difficulty.songId,
+                  noteCount: difficulty.noteCount,
+                  chartFile: difficulty.chartFile,
+                },
+              };
+
               if (existingSong) {
                 const existingDiff = existingSong.difficulties.find(
                   (d) => d.name === difficulty.name && d.keys === difficulty.keys
                 );
                 if (!existingDiff) {
-                  existingSong.difficulties.push(difficulty);
+                  const updatedSong: Song = {
+                    ...existingSong,
+                    difficulties: [...existingSong.difficulties, difficulty],
+                  };
+                  addSong(updatedSong, fullChart);
                 }
               } else {
                 const folderName = file.webkitRelativePath?.split('/')[0] || '导入';
@@ -153,16 +168,6 @@ const PackManager = () => {
                   bpm: chart.song.bpm,
                   duration: Math.max(...chart.notes.map((n) => n.time + (n.duration || 0))) / 1000,
                   difficulties: [difficulty],
-                };
-                const fullChart = {
-                  ...chart,
-                  difficulty: {
-                    ...chart.difficulty,
-                    id: difficulty.id,
-                    songId: difficulty.songId,
-                    noteCount: difficulty.noteCount,
-                    chartFile: difficulty.chartFile,
-                  },
                 };
                 addSong(newSong, fullChart);
               }
@@ -257,7 +262,11 @@ const PackManager = () => {
             (d) => d.name === difficulty.name && d.keys === difficulty.keys
           );
           if (!existingDiff) {
-            existingSong.difficulties.push(difficulty);
+            const updatedSong: Song = {
+              ...existingSong,
+              difficulties: [...existingSong.difficulties, difficulty],
+            };
+            addSong(updatedSong, fullChart);
           }
         } else {
           const newSong: Song = {
